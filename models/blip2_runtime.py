@@ -9,7 +9,12 @@ import torch.nn.functional as F
 from PIL import Image
 from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader, Dataset
-from transformers import Blip2ForConditionalGeneration, Blip2Model, Blip2Processor, PreTrainedModel
+from transformers import (
+    Blip2ForConditionalGeneration,
+    Blip2Model,
+    Blip2Processor,
+    PreTrainedModel,
+)
 
 DEFAULT_MODEL_ID = "Salesforce/blip2-opt-2.7b"
 
@@ -43,7 +48,10 @@ def set_runtime_device(device: torch.device) -> None:
 
 def clear_cuda_cache() -> None:
     if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        try:
+            torch.cuda.empty_cache()
+        except RuntimeError as exc:
+            print(f"Warning: unable to clear CUDA cache ({exc}); continuing on CPU.", flush=True)
 
 
 def _load_processor(model_source: str) -> Blip2Processor:
@@ -99,6 +107,13 @@ def get_retrieval_model(model_source: str = DEFAULT_MODEL_ID) -> Blip2Model:
     return move_model_to_runtime(model)
 
 
+def reset_runtime_device(device: torch.device) -> None:
+    get_processor.cache_clear()
+    get_caption_model.cache_clear()
+    get_retrieval_model.cache_clear()
+    _set_device(device)
+
+
 def move_tensors(inputs: Mapping[str, object]) -> dict[str, object]:
     def _move_all(*, non_blocking: bool) -> dict[str, object]:
         moved: dict[str, object] = {}
@@ -130,13 +145,24 @@ def prepare_inputs(
     text: Sequence[str] | str | None = None,
 ) -> dict[str, object]:
     processor_kwargs: dict[str, object] = {"return_tensors": "pt"}
+    repeat_count: int | None = None
 
     if text is not None:
         processor_kwargs["text"] = text
         if isinstance(text, Sequence) and not isinstance(text, str):
             processor_kwargs["padding"] = True
+            try:
+                repeat_count = len(text)
+            except TypeError:
+                repeat_count = None
 
-    tensors = processor(images=image, **processor_kwargs)
+    images_arg: Image.Image | Sequence[Image.Image]
+    if repeat_count and repeat_count > 1 and isinstance(image, Image.Image):
+        images_arg = [image] * repeat_count
+    else:
+        images_arg = image
+
+    tensors = processor(images=images_arg, **processor_kwargs)
     return dict(tensors.items())
 
 

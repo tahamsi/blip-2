@@ -141,6 +141,8 @@ python scripts/blip2_cli.py retrieval data/samples/image.jpg \
     --model-source Salesforce/blip2-opt-2.7b
 ```
 
+Behind the scenes the image tensor is automatically replicated so each candidate text is scored independently. If CUDA kernels fault (for example due to masked scatter asserts) the CLI transparently reloads the model on CPU and retries. Candidate rankings are derived from the average log-likelihood of each decoded sequence, so you can pass any number of texts and receive a normalized probability distribution over them.
+
 ---
 
 ## Fine-Tuning
